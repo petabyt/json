@@ -17,11 +17,13 @@
 static int next(struct Parse *p) {
 	char *b = p->b;
 
-	while (*b == ' ' || *b == '\n') {
+	while (*b == ' ' || *b == '\n' || *b == '\t') {
 		b++;
 	}
 
-	if (*b == '\0') return 1;
+	if (*b == '\0') {
+		return 1;
+	}
 
 	int type;
 
@@ -29,25 +31,17 @@ static int next(struct Parse *p) {
 		type = JSON_OBJ;
 	} else if (*b == '[') {
 		type = JSON_ARR;
-	} else if (*b == '\"') {
+	} else if (*b == '\"' || *b == '\'') {
+		char quote_type = *b;
 		type = JSON_STR;
 		b++;
 		p->str = b;
 		p->str_len = 0;
-		while (*b != '\"') {
-			b++;
-			p->str_len++;
+		while (*b != quote_type) {
 			if (*b == '\\') {
-				b += 2;
-				p->str_len += 2;
+				b++;
+				p->str_len++;
 			}
-		}
-	} else if (*b == '\'') {
-		type = JSON_STR;
-		b++;
-		p->str = b;
-		p->str_len = 0;
-		while (*b != '\'') {
 			b++;
 			p->str_len++;
 		}
@@ -70,7 +64,7 @@ static int next(struct Parse *p) {
 	} else if (*b == ',') {
 		type = JSON_COMMA;
 	} else {
-		printf("Unknown tok %c (%s)\n", *b, b);
+		printf("Unknown tok %c\n", *b);
 		return 1;
 	}
 
@@ -130,6 +124,10 @@ static int parse_array(struct Parse *p, int skip) {
 			parse_array(p, ignore);
 			if (!ignore) return 1;
 		} else if (p->type == JSON_END_ARR) {
+			if (!skip && (p->intent_i > i)) {
+				p->out_of_bounds = 1;
+				return 1;
+			}
 			return 0;
 		} else if (p->type == JSON_COMMA) {
 			i++;
@@ -145,16 +143,23 @@ static int parse_array(struct Parse *p, int skip) {
 static int parse_block(struct Parse *p, int skip) {
 	while (!next(p)) {
 		if (p->type == JSON_STR) {
-			int ignore = 1;
+			int ignore = 1; char *prev = 0;
 			if (!skip && p->intent_type == JSON_STR) {
 				if (!strncmp(p->str, p->intent_key, p->str_len)) {
 					ignore = 0;
-					next_intent(p);
+					if (next_intent(p)) {
+						next(p); // skip JSON_KEY
+						prev = p->b; // save token pos
+					}
 				}
 			}
-			next(p);
+			if (!prev) next(p);
 			if (p->type == JSON_KEY) {
-				next(p);
+				next(p); // we need to know if this is a dead end or not
+				if (prev) {
+					if (p->type == JSON_STR || p->type == JSON_NUM) return 1; // we are at str/int, no more children to parse
+					if (p->type == JSON_OBJ || p->type == JSON_ARR) {  p->b = prev; return 1; } // we have children to parse, go back
+				}
 				if (p->type == JSON_OBJ) {
 					if (parse_block(p, ignore)) return 1;
 				} else if (p->type == JSON_ARR) {
@@ -172,7 +177,7 @@ static int parse_block(struct Parse *p, int skip) {
 		} else if (p->type == JSON_END_OBJ) {
 			return 0;
 		} else {
-			printf("key: nexpected type %c\n", p->type);
+			printf("key: expected type %c\n", p->type);
 		}
 	}
 
@@ -187,13 +192,17 @@ int json_get(struct Parse *p, char *text, char *intent) {
 	next(p);
 	if (p->type == JSON_OBJ) {
 		parse_block(p, 0);
+	} else if (p->type == JSON_ARR) {
+		parse_array(p, 0);
+	} else {
+		printf("Unsupported type to start at %c\n", p->type);
 	}
 
-	return 1;
+	return 0;
 }
 
-char *json_fixup_string(struct Parse *p) {
-	char *buf = malloc(p->str_len);
+// buf size must be at least p->str_len + 1
+char *json_parse_string(struct Parse *p, char *buf) {
 	int c2 = 0;
 	for (int c = 0; c < p->str_len; c++) {
 		if (p->str[c] == '\\') {
@@ -206,8 +215,16 @@ char *json_fixup_string(struct Parse *p) {
 			buf[c2] = p->str[c];
 		}
 		c2++;
+		if (c2 > p->str_len) {
+			return "Out of bounds bug";
+		}
 	}
-	buf[c2] = '\0';	
+	buf[c2] = '\0';
+	return buf;
+}
 
-	return buf;	
+// Optional
+char *json_fixup_string(struct Parse *p) {
+	char *buf = malloc(p->str_len + 1);
+	return json_parse_string(p, buf);
 }
