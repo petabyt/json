@@ -1,20 +1,20 @@
 # json
-API is python-like:
+~200LoC. It has one function:
 ```
+char *data = ... see c.txt ...;
 struct Parse p;
 json_get(&p, data, "['amendments'][10]");
 ```
-
-It skips lexing and goes straight through the syntax recursive-descent style.
-At the same time, it loops through a JSON-like "intent" (which uses the same tokenizer) to get a desired value.
+The output of the JS-like 'intent' will be stored in `p.str` with length `p.str_len`. This will just point to an offset in the buffer you gave the parser.
+Optionally, you can call `char *json_fixup_string(struct Parse *p)` to get a formatted output.
 
 Advantages:
-- The entire structure doesn't have to be lexed/parsed for a single read
-- Easy to use
-- No memory allocation
-- Very simple implementation
+- Very fast lexer & recursive descent parser
+- Simple API
+- No memory allocation required
+- Correct (?) It parsed the entire [bible](https://github.com/heb12/gratis.json/blob/master/en/web.json).
 
 Disadvantages:
-- May not throw error on invalid syntax
-- Have to parse the entire structure for multiple reads
+- May not throw error on invalid syntax / invalid accesses
+- Not written with memory safety in mind
 - Doesn't parse into a tree for reformatting back to text
